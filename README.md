@@ -1,25 +1,19 @@
-# 摸 Mo
+# 糯
 
-十种材质，一面屏。没有文字、没有分数、没有声音。
+一坨坐在桌面上的软东西。按下去会陷，松手会晃。没有文字、没有分数、没有声音。
 
-手指划过去，连续触感的强度和锐利度跟着材质与手速实时变化，
-离散颗粒（玻璃珠、链条）按位移累积触发。
+全部用 Core Graphics 绘制：投影 → 本体 → 体积光 → 底部内阴影 → 边缘反光 → 柔光 → 锐利高光 → 透光暖芯。
 
-底部十个小点，从左到右：
-
-1 丝绸 · 2 砂纸 · 3 玻璃珠 · 4 湿沙 · 5 链条
-6 天鹅绒 · 7 冰 · 8 苔藓 · 9 鹅卵石 · 10 锡纸
+触感是连续调制的一条低频震动（随压深变化），松手时一记三连衰减的"啵"。
 
 ## 出包
 
-推到 GitHub 后 Actions 自动编译，产物 `Mo-unsigned.ipa` 在 Artifacts 里。
-未签名，需要用 Sideloadly 配自己的 Apple ID 签一次。
+推到 GitHub 后 Actions 自动编译，产物 Mo-unsigned.ipa 在 Artifacts 里，用 Sideloadly 签名安装。
 
 ## 结构
 
-```
 Mo/
-├─ App/       MoApp · RootView（材质切换）
-├─ Core/      Haptics（连续触感 + 离散颗粒）
-└─ Surface/   Material（十种参数）· TextureFactory（程序化底图）· MaterialSurface
-```
+├─ App/    MoApp · RootView（桌面背景）
+├─ Blob/   BlobModel（软体物理）· BlobView（轮廓与光照）
+├─ Core/   Haptics · FrameDriver
+└─ Design/ Palette

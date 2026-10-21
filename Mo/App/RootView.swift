@@ -1,9 +1,9 @@
 //
 //  RootView.swift
-//  摸 Mo
+//  糯
 //
-//  一整块材质 + 底部一排小点。没有标题、没有名字、没有设置。
-//  换材质就点一下小点，从左到右十个。
+//  屏幕就是一张桌子。桌子上只有一坨东西。
+//  没有文字、没有按钮、没有其他任何东西。
 //
 
 import SwiftUI
@@ -11,23 +11,12 @@ import UIKit
 
 struct RootView: View {
 
-    @State private var index = 0
-
     var body: some View {
         ZStack {
-            MaterialSurface(material: Material.all[index])
-                .id(index)
-                .transition(.opacity)
+            desk
+            BlobView()
                 .ignoresSafeArea()
-
-            VStack {
-                Spacer()
-                rail
-                    .padding(.bottom, 16)
-            }
         }
-        .animation(.easeInOut(duration: 0.32), value: index)
-        .background(Color.black.ignoresSafeArea())
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
         }
@@ -36,23 +25,31 @@ struct RootView: View {
         }
     }
 
-    private var rail: some View {
-        HStack(spacing: 0) {
-            ForEach(Material.all) { item in
-                Capsule()
-                    .fill(Color.white.opacity(item.id == index ? 0.88 : 0.26))
-                    .frame(width: item.id == index ? 16 : 5, height: 5)
-                    .frame(width: 26, height: 44)
-                    .contentShape(Rectangle())
-                    .onTapGesture { index = item.id }
-            }
+    private var desk: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Palette.deskTop, Palette.deskBottom],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            // 左上打下来的一束光，落成一片光池
+            RadialGradient(
+                colors: [Color.white.opacity(0.055), .clear],
+                center: UnitPoint(x: 0.24, y: 0.10),
+                startRadius: 0,
+                endRadius: 520
+            )
+
+            // 物件周围的一圈微弱反光
+            RadialGradient(
+                colors: [Color.white.opacity(0.030), .clear],
+                center: UnitPoint(x: 0.5, y: 0.45),
+                startRadius: 0,
+                endRadius: 320
+            )
         }
-        .padding(.horizontal, 12)
-        .background(
-            Capsule()
-                .fill(Color.black.opacity(0.30))
-                .blur(radius: 14)
-        )
+        .ignoresSafeArea()
     }
 }
 

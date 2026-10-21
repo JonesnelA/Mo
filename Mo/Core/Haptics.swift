@@ -1,13 +1,12 @@
 //
 //  Haptics.swift
-//  摸 Mo
+//  糯
 //
-//  核心不是"打点"，是"连续"。
-//  手指按下去的那一刻开始播一条 30 秒的 continuous 事件（循环），
-//  然后每帧用 sendParameters 调它的强度和锐利度 —— 于是震感会跟着材质、位置、手速连续变化。
+//  这一版只需要两种触感：
+//  1. 按住时的一条低频连续震动 —— 像手指陷进一块软胶
+//  2. 松手时的一记"啵" —— 三个快速衰减的瞬态，模拟回弹
 //
-//  离散的颗粒（玻璃珠、链条）另外用瞬态事件叠上去。
-//  全程无音频：不 import AVFoundation。
+//  不 import AVFoundation，全静音。
 //
 
 import CoreHaptics
@@ -19,11 +18,10 @@ final class Haptics {
     static let shared = Haptics()
 
     private var engine: CHHapticEngine?
-    private var texturePlayer: CHHapticAdvancedPatternPlayer?
-    private var grainPlayers: [CHHapticPatternPlayer] = []
-    private var grainCursor = 0
+    private var squishPlayer: CHHapticAdvancedPatternPlayer?
+    private var boingPlayers: [CHHapticPatternPlayer] = []
+    private var boingCursor = 0
     private var engineRunning = false
-    private var lastGrain: CFTimeInterval = 0
 
     private init() {
         guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
@@ -32,110 +30,110 @@ final class Haptics {
         self.engine = engine
         engine.playsHapticsOnly = true
         engine.isAutoShutdownEnabled = false
-
         engine.resetHandler = { [weak self] in
             self?.engineRunning = false
             self?.startEngine()
-            self?.rebuildGrainPlayers()
+            self?.rebuild()
         }
         engine.stoppedHandler = { [weak self] _ in
             self?.engineRunning = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                self?.startEngine()
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self?.startEngine() }
         }
 
         startEngine()
-        rebuildGrainPlayers()
+        rebuild()
     }
 
     private func startEngine() {
         guard let engine, !engineRunning else { return }
-        do {
-            try engine.start()
-            engineRunning = true
-        } catch {
-            engineRunning = false
-        }
+        do { try engine.start(); engineRunning = true } catch { engineRunning = false }
     }
 
-    // MARK: - 连续纹理
+    // MARK: 按住
 
-    /// 手指落下：开始摩擦感
-    func beginTexture(_ profile: HapticProfile) {
+    func beginSquish() {
         startEngine()
         guard let engine else { return }
-        stopTexture()
+        stopSquish()
 
         let event = CHHapticEvent(
             eventType: .hapticContinuous,
             parameters: [
-                CHHapticEventParameter(parameterID: .hapticIntensity, value: profile.base),
-                CHHapticEventParameter(parameterID: .hapticSharpness, value: profile.sharpness)
+                CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.16),
+                CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.06)
             ],
             relativeTime: 0,
             duration: 30
         )
-
         guard let pattern = try? CHHapticPattern(events: [event], parameters: []),
               let player = try? engine.makeAdvancedPlayer(with: pattern) else { return }
 
         player.loopEnabled = true
-        texturePlayer = player
+        squishPlayer = player
         try? player.start(atTime: CHHapticTimeImmediate)
     }
 
-    /// 每帧调用。intensity / sharpness 已经由调用方按手速算好
-    func updateTexture(intensity: Float, sharpness: Float) {
-        guard let texturePlayer else { return }
-        let i = max(0, min(1, intensity))
-        let s = max(0, min(1, sharpness))
-        try? texturePlayer.sendParameters([
-            CHHapticDynamicParameter(parameterID: .hapticIntensityControl, value: i, relativeTime: 0),
-            CHHapticDynamicParameter(parameterID: .hapticSharpnessControl, value: s, relativeTime: 0)
+    func updateSquish(intensity: Float, sharpness: Float) {
+        guard let squishPlayer else { return }
+        try? squishPlayer.sendParameters([
+            CHHapticDynamicParameter(parameterID: .hapticIntensityControl,
+                                     value: max(0, min(1, intensity)), relativeTime: 0),
+            CHHapticDynamicParameter(parameterID: .hapticSharpnessControl,
+                                     value: max(0, min(1, sharpness)), relativeTime: 0)
         ], atTime: CHHapticTimeImmediate)
     }
 
-    func stopTexture() {
-        try? texturePlayer?.stop(atTime: CHHapticTimeImmediate)
-        texturePlayer = nil
+    func stopSquish() {
+        try? squishPlayer?.stop(atTime: CHHapticTimeImmediate)
+        squishPlayer = nil
     }
 
-    // MARK: - 离散颗粒
+    // MARK: 回弹
 
-    func grain(strength: Float, sharpness: Float, minInterval: CFTimeInterval = 0.018) {
-        let now = CACurrentMediaTime()
-        guard now - lastGrain >= minInterval else { return }
-        lastGrain = now
+    /// 三连衰减：0ms / 55ms / 120ms，越来越轻 —— 听不见的"啵"
+    func boing(strength: Float) {
         startEngine()
+        let s = max(0.2, min(1, strength))
 
-        guard !grainPlayers.isEmpty else { return }
-        let player = grainPlayers[grainCursor % grainPlayers.count]
-        grainCursor += 1
-        if (try? player.start(atTime: CHHapticTimeImmediate)) != nil { return }
-
-        UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: CGFloat(max(0.2, min(1, strength))))
+        guard let player = nextBoingPlayer() else {
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: CGFloat(s))
+            return
+        }
+        if (try? player.start(atTime: CHHapticTimeImmediate)) == nil {
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: CGFloat(s))
+        }
     }
 
-    private func rebuildGrainPlayers() {
-        guard let engine else { return }
-        grainPlayers.removeAll()
+    private func nextBoingPlayer() -> CHHapticPatternPlayer? {
+        guard !boingPlayers.isEmpty else { return nil }
+        let player = boingPlayers[boingCursor % boingPlayers.count]
+        boingCursor += 1
+        return player
+    }
 
-        let specs: [(Float, Float)] = [(0.55, 0.35), (0.45, 0.70), (0.80, 0.85)]
-        for (intensity, sharpness) in specs {
-            let event = CHHapticEvent(
-                eventType: .hapticTransient,
-                parameters: [
-                    CHHapticEventParameter(parameterID: .hapticIntensity, value: intensity),
-                    CHHapticEventParameter(parameterID: .hapticSharpness, value: sharpness)
-                ],
-                relativeTime: 0
-            )
-            for _ in 0..<2 {
-                if let pattern = try? CHHapticPattern(events: [event], parameters: []),
-                   let player = try? engine.makePlayer(with: pattern) {
-                    grainPlayers.append(player)
-                }
+    private func rebuild() {
+        guard let engine else { return }
+        boingPlayers.removeAll()
+
+        // 强度写死在 pattern 里，靠多个变体轮换
+        for strength in [Float(1.0), 0.7, 0.45] {
+            let events = [
+                CHHapticEvent(eventType: .hapticTransient, parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.75 * strength),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.10)
+                ], relativeTime: 0),
+                CHHapticEvent(eventType: .hapticTransient, parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.42 * strength),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.14)
+                ], relativeTime: 0.055),
+                CHHapticEvent(eventType: .hapticTransient, parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.22 * strength),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.20)
+                ], relativeTime: 0.12)
+            ]
+            if let pattern = try? CHHapticPattern(events: events, parameters: []),
+               let player = try? engine.makePlayer(with: pattern) {
+                boingPlayers.append(player)
             }
         }
     }
